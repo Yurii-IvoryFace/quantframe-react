@@ -5,7 +5,6 @@ import { useForm } from "@mantine/form";
 import { useQuery } from "@tanstack/react-query";
 import api from "@api/index";
 import { useEffect } from "react";
-import { ItemName } from "@components/DataDisplay/ItemName";
 
 export type StockRivenUpdateProps = {
   values?: number[];
@@ -24,18 +23,30 @@ export function StockRivenUpdate({ values, onUpdate }: StockRivenUpdateProps) {
     enabled: !!values && values.length === 1,
   });
 
+  const buildInitialValues = (id?: number, details?: TauriTypes.StockRivenDetails): TauriTypes.UpdateStockRiven => ({
+    id: id ?? -1,
+    mastery_rank: details?.mastery_rank,
+    re_rolls: details?.rerolls,
+  });
+
   const form = useForm({
-    initialValues: data?.stock as TauriTypes.UpdateStockRiven,
+    initialValues: buildInitialValues(values?.[0], data),
   });
 
   useEffect(() => {
-    if (data) form.setValues(data.stock as TauriTypes.UpdateStockRiven);
-  }, [data]);
+    if (!values?.length) return;
+    if (data) form.setValues(buildInitialValues(values[0], data));
+    else form.setFieldValue("id", values[0]);
+  }, [data, values]);
 
   return (
     <form onSubmit={form.onSubmit(async (values) => onUpdate?.(values))}>
       <Group justify="space-between" mb={"md"}>
-        {data && <ItemName value={data.stock} />}
+        {data && (
+          <Text>
+            {data.weapon_name} {data.sub_name}
+          </Text>
+        )}
         {!data && <Text>{useTranslate("title", { count: values?.length || 0 })}</Text>}
       </Group>
       <Divider />
