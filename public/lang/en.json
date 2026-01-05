@@ -588,7 +588,9 @@
       "items": {
         "app_label": "Application",
         "settings": "Settings",
-        "logout": "Logout"
+        "logout": "Logout",
+        "logout_confirm_yes": "Yes",
+        "logout_confirm_no": "No"
       },
       "errors": {
         "logout": {

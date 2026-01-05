@@ -1,4 +1,5 @@
 import { Text, Group, Menu, Avatar, Button, Indicator } from "@mantine/core";
+import { useState } from "react";
 import api, { SendTauriDataEvent, SendTauriEvent, WFMThumbnail } from "@api/index";
 import { TauriTypes, UserStatus } from "$types";
 import classes from "./UserMenu.module.css";
@@ -16,6 +17,7 @@ export function UserMenu() {
   // States
   const { user } = useAuthContext();
   const { settings, app_error, setLang } = useAppContext();
+  const [isConfirmLogout, setIsConfirmLogout] = useState(false);
 
   // Translate general
   const useTranslateUserMenu = (key: string, context?: { [key: string]: any }, i18Key?: boolean) =>
@@ -78,8 +80,17 @@ export function UserMenu() {
     return true;
   };
 
+  const isAuthenticated = IsAuthenticated();
+
   return (
-    <Menu shadow="md" width={200} transitionProps={{ transition: "fade-down", duration: 150 }} position="bottom-end" offset={5}>
+    <Menu
+      shadow="md"
+      width={200}
+      transitionProps={{ transition: "fade-down", duration: 150 }}
+      position="bottom-end"
+      offset={5}
+      onClose={() => setIsConfirmLogout(false)}
+    >
       <Menu.Target>
         <Group>
           <Indicator
@@ -169,15 +180,37 @@ export function UserMenu() {
         >
           {useTranslateUserMenu("items.settings")}
         </Menu.Item>
-        <Menu.Item
-          disabled={!IsAuthenticated()}
-          leftSection={<FontAwesomeIcon icon={faRightFromBracket} />}
-          onClick={async () => {
-            await logOutMutation.mutateAsync();
-          }}
-        >
-          {useTranslateUserMenu("items.logout")}
-        </Menu.Item>
+        {isAuthenticated && isConfirmLogout ? (
+          <Menu.Item component="div" closeMenuOnClick={false}>
+            <Group gap={4} grow wrap="nowrap">
+              <Button
+                size="xs"
+                variant="light"
+                onClick={async () => {
+                  setIsConfirmLogout(false);
+                  await logOutMutation.mutateAsync();
+                }}
+              >
+                {useTranslateUserMenu("items.logout_confirm_yes")}
+              </Button>
+              <Button size="xs" variant="subtle" onClick={() => setIsConfirmLogout(false)}>
+                {useTranslateUserMenu("items.logout_confirm_no")}
+              </Button>
+            </Group>
+          </Menu.Item>
+        ) : (
+          <Menu.Item
+            disabled={!isAuthenticated}
+            leftSection={<FontAwesomeIcon icon={faRightFromBracket} />}
+            closeMenuOnClick={false}
+            onClick={() => {
+              if (!isAuthenticated) return;
+              setIsConfirmLogout(true);
+            }}
+          >
+            {useTranslateUserMenu("items.logout")}
+          </Menu.Item>
+        )}
       </Menu.Dropdown>
     </Menu>
   );
