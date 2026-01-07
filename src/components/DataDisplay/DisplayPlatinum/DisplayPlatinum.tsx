@@ -11,7 +11,8 @@ export type DisplayPlatinumProps = {
 export const DisplayPlatinum = memo(function DisplayPlatinum({ value, iconColor }: DisplayPlatinumProps) {
   return (
     <Group gap={2}>
-      <NumberFormatter value={value} thousandsGroupStyle="thousand" thousandSeparator="," /> <FontAwesomeIcon icon={faPlat} color={iconColor} />
+      <NumberFormatter value={value} thousandsGroupStyle="thousand" thousandSeparator="," decimalScale={2} />{" "}
+      <FontAwesomeIcon icon={faPlat} color={iconColor} />
     </Group>
   );
 });

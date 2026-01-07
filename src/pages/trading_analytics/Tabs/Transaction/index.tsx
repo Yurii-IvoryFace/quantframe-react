@@ -300,7 +300,7 @@ export const TransactionPanel = ({ isActive }: TransactionPanelProps = {}) => {
           />
         </Grid.Col>
         {showReport && (
-          <Grid.Col span={5}>
+          <Grid.Col span={5} style={{ maxHeight: 'calc(100vh - 150px)', display: 'flex', flexDirection: 'column' }}>
             <FinancialReportCard data={financialReportQuery.data || null} loading={financialReportQuery.isLoading} />
           </Grid.Col>
         )}

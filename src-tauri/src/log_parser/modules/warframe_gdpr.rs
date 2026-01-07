@@ -462,17 +462,17 @@ impl WarframeGDPRModule {
             ),
             &LoggerOptions::default(),
         );
-        notify_gui!(
-            "warframe_gdpr_data_loaded",
-            "green",
-            "success",
-            json!({
-                "trades": trades.len(),
-                "logins": logins.len(),
-                "purchases": purchases.len(),
-                "transactions": transactions.len(),
-            })
-        );
+        // notify_gui!(
+        //     "warframe_gdpr_data_loaded",
+        //     "green",
+        //     "success",
+        //     json!({
+        //         "trades": trades.len(),
+        //         "logins": logins.len(),
+        //         "purchases": purchases.len(),
+        //         "transactions": transactions.len(),
+        //     })
+        // );
         enable_logging(true);
         Ok(())
     }

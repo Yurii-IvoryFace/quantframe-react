@@ -71,17 +71,17 @@ export const MetricCard = ({
   };
 
   return (
-    <Card padding="md" radius="md">
-      <Group justify="space-between" mb="xs" align="flex-start">
+    <Card padding="md" radius="md" h="100%" miw="180px">
+      <Group justify="space-between" mb="xs" align="flex-start" wrap="nowrap">
         <Text size="xs" c="dimmed" fw={700} tt={textTransform}>
           {title}
         </Text>
-        <ThemeIcon size="lg" variant="light" color={getTrendColor()} style={{ display: icon ? "" : "none" }}>
+        <ThemeIcon size="lg" variant="light" color={getTrendColor()} style={{ display: icon ? "" : "none", flexShrink: 0 }}>
           {icon}
         </ThemeIcon>
       </Group>
 
-      <Group gap={2}>
+      <Group gap={2} display="flex" justify="space-between">
         <Text fw={700} fz="xl" c={getTrendColor()}>
           {prefix}
           {renderValue()}
