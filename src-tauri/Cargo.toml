@@ -39,6 +39,8 @@ tauri-plugin-clipboard-manager = "2.3.0"
 # Other dependencies
 reqwest = { version = "0.12.19", features = ["json"] }
 tokio = {version =  "1.45.1", features = ["full"] }
+tokio-tungstenite = "0.26.2"
+futures-util = "0.3.31"
 regex = "1.9.1"
 chrono = "0.4"
 zip = "0.6"

@@ -8,6 +8,7 @@ version = "1.6.14"
 dependencies = [
  "chrono",
  "entity",
+ "futures-util",
  "migration",
  "qf_api",
  "regex",
@@ -28,6 +29,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-updater",
  "tokio",
+ "tokio-tungstenite",
  "utils",
  "uuid",
  "wf-market",

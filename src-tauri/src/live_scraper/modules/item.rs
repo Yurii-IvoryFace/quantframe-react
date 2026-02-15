@@ -2,7 +2,10 @@ use std::{
     collections::HashSet,
     path::PathBuf,
     sync::{Arc, Weak, atomic::Ordering},
+    time::Duration,
 };
+
+use tokio::task::JoinSet;
 
 use entity::{dto::PriceHistory, enums::stock_status::StockStatus};
 use serde_json::json;
@@ -159,6 +162,26 @@ impl ItemModule {
         interesting_items.sort_by(|a, b| b.priority.cmp(&a.priority));
         let total = interesting_items.len();
 
+        // Use parallel worker path if workers are connected
+        if !use_fake {
+            let worker_pool = MultiWorkerPool::global();
+            let worker_count = worker_pool.worker_count().await;
+            if worker_count > 0 {
+                info(
+                    format!("{}WorkerPool", COMPONENT),
+                    &format!(
+                        "Processing {} items with {} connected workers.",
+                        total, worker_count
+                    ),
+                    &&LoggerOptions::default(),
+                );
+                return self
+                    .process_items_parallel(interesting_items, app, worker_pool)
+                    .await;
+            }
+        }
+
+        // ── Original sequential loop (fake orders or no workers) ──
         for item_entry in interesting_items {
             // Stop if client stopped running or user is banned
             if !client.is_running.load(Ordering::SeqCst) || app.user.is_banned() {
@@ -202,7 +225,7 @@ impl ItemModule {
                 .join("fake_orders")
                 .join(format!("order_{}.json", item_info.wfm_url_name));
 
-            let mut orders = if use_fake && order_path.exists() {
+            let orders = if use_fake && order_path.exists() {
                 match utils::read_json_file::<OrderList<OrderWithUser>>(&order_path) {
                     Ok(cached) => {
                         info(
@@ -244,89 +267,233 @@ impl ItemModule {
                 .await?
             };
 
-            // Apply filters to orders
-            orders.filter_by_sub_type(
-                wf_market::types::SubType::from_entity(item_entry.sub_type.clone()),
-                false,
-            );
-            orders.filter_username(&app.user.wfm_username, true);
-            orders.filter_user_status(StatusType::InGame, false);
-            orders.sort_by_platinum();
-
-            info(
-                format!("{}ProcessItem", COMPONENT),
-                &format!(
-                    "Processing {}: {} buy orders, {} sell orders",
-                    item_entry.uuid(),
-                    orders.buy_orders.len(),
-                    orders.sell_orders.len()
-                ),
-                &&LoggerOptions::default(),
-            );
-
-            // Process buying logic
-            if item_entry.operation.contains(&"Buy".to_string())
-                && !item_entry.operation.contains(&"WishList".to_string())
-            {
-                if let Err(e) = self
-                    .progress_buying(&item_info, &item_entry, &item_price, &orders)
-                    .await
-                {
-                    return Err(e.with_location(get_location!()));
-                }
-
-                info(
-                    format!("{}ProgressBuying", COMPONENT),
-                    &format!(
-                        "Successfully processed buying for item: {}",
-                        item_entry.wfm_url
-                    ),
-                    &&LoggerOptions::default(),
-                );
-            }
-
-            // Process wishlist logic (future expansion)
-            if item_entry.operation.contains(&"WishList".to_string()) {
-                if let Err(e) = self
-                    .progress_wish_list(&item_info, &item_entry, &item_price, &orders)
-                    .await
-                {
-                    return Err(e.with_location(get_location!()));
-                }
-
-                info(
-                    format!("{}ProgressWishList", COMPONENT),
-                    &format!(
-                        "Successfully processed wishlist for item: {}",
-                        item_entry.wfm_url
-                    ),
-                    &&LoggerOptions::default(),
-                );
-            }
-
-            // Process selling logic (future expansion)
-            if item_entry.operation.contains(&"Sell".to_string()) && item_entry.stock_id.is_some() {
-                if let Err(e) = self
-                    .progress_selling(&item_info, &item_entry, &item_price, &orders)
-                    .await
-                {
-                    return Err(e.with_location(get_location!()));
-                }
-
-                info(
-                    format!("{}ProgressBuying", COMPONENT),
-                    &format!(
-                        "Successfully processed buying for item: {}",
-                        item_entry.wfm_url
-                    ),
-                    &&LoggerOptions::default(),
-                );
-            }
-
+            self.process_item_orders(&item_entry, &item_info, &item_price, orders, app)
+                .await?;
             current_index += 1;
         }
 
         Ok(())
+    }
+
+    /// Process fetched orders for a single item: filter, then run buying/selling/wishlist logic.
+    async fn process_item_orders(
+        &self,
+        item_entry: &ItemEntry,
+        item_info: &CacheTradableItem,
+        item_price: &ItemPriceInfo,
+        mut orders: OrderList<OrderWithUser>,
+        app: &AppState,
+    ) -> Result<(), Error> {
+        // Apply filters to orders
+        orders.filter_by_sub_type(
+            wf_market::types::SubType::from_entity(item_entry.sub_type.clone()),
+            false,
+        );
+        orders.filter_username(&app.user.wfm_username, true);
+        orders.filter_user_status(StatusType::InGame, false);
+        orders.sort_by_platinum();
+
+        info(
+            format!("{}ProcessItem", COMPONENT),
+            &format!(
+                "Processing {}: {} buy orders, {} sell orders",
+                item_entry.uuid(),
+                orders.buy_orders.len(),
+                orders.sell_orders.len()
+            ),
+            &&LoggerOptions::default(),
+        );
+
+        // Process buying logic
+        if item_entry.operation.contains(&"Buy".to_string())
+            && !item_entry.operation.contains(&"WishList".to_string())
+        {
+            if let Err(e) = self
+                .progress_buying(item_info, item_entry, item_price, &orders)
+                .await
+            {
+                return Err(e.with_location(get_location!()));
+            }
+
+            info(
+                format!("{}ProgressBuying", COMPONENT),
+                &format!(
+                    "Successfully processed buying for item: {}",
+                    item_entry.wfm_url
+                ),
+                &&LoggerOptions::default(),
+            );
+        }
+
+            // Process wishlist logic (future expansion)
+        if item_entry.operation.contains(&"WishList".to_string()) {
+            if let Err(e) = self
+                .progress_wish_list(item_info, item_entry, item_price, &orders)
+                .await
+            {
+                return Err(e.with_location(get_location!()));
+            }
+
+            info(
+                format!("{}ProgressWishList", COMPONENT),
+                &format!(
+                    "Successfully processed wishlist for item: {}",
+                    item_entry.wfm_url
+                ),
+                &&LoggerOptions::default(),
+            );
+        }
+
+            // Process selling logic (future expansion)
+        if item_entry.operation.contains(&"Sell".to_string()) && item_entry.stock_id.is_some() {
+            if let Err(e) = self
+                .progress_selling(item_info, item_entry, item_price, &orders)
+                .await
+            {
+                return Err(e.with_location(get_location!()));
+            }
+
+            info(
+                format!("{}ProgressBuying", COMPONENT),
+                &format!(
+                    "Successfully processed buying for item: {}",
+                    item_entry.wfm_url
+                ),
+                &&LoggerOptions::default(),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Parallel fetch orders via workers, process as results arrive.
+    async fn process_items_parallel(
+        &self,
+        interesting_items: Vec<ItemEntry>,
+        app: &AppState,
+        worker_pool: Arc<MultiWorkerPool>,
+    ) -> Result<(), Error> {
+        let cache = states::cache_client()?;
+        let client = self.client.upgrade().expect("Client should not be dropped");
+        let total = interesting_items.len();
+        let mut current_index = 1usize;
+        let mut jobs = JoinSet::new();
+        let mut pending = interesting_items.into_iter();
+
+        let worker_count = worker_pool.worker_count().await.max(1);
+        let timeout = Duration::from_secs(45);
+
+        // Seed: one in-flight task per worker
+        for _ in 0..worker_count {
+            if let Some(item_entry) = pending.next() {
+                let slug = item_entry.wfm_url.clone();
+                let wp = worker_pool.clone();
+                jobs.spawn(async move {
+                    let result = wp.fetch_orders(slug, timeout).await;
+                    (item_entry, result)
+                });
+            }
+        }
+
+        while let Some(joined) = jobs.join_next().await {
+            let (item_entry, orders_result) = match joined {
+                Ok(result) => result,
+                Err(e) => {
+                    warning(
+                        format!("{}WorkerPool", COMPONENT),
+                        &format!("Worker task join error: {}", e),
+                        &&LoggerOptions::default(),
+                    );
+                    continue;
+                }
+            };
+
+            if !client.is_running.load(Ordering::SeqCst) || app.user.is_banned() {
+                warning(
+                    format!("{}ProcessItem", COMPONENT),
+                    "Live Scraper is not running or user is banned, stopping processing.",
+                    &&LoggerOptions::default(),
+                );
+                jobs.abort_all();
+                break;
+            }
+
+            let item_info = match cache.tradable_item().get_by(&item_entry.wfm_url) {
+                Ok(item) => item,
+                Err(e) => {
+                    e.set_component(format!("{}ProcessItem", COMPONENT))
+                        .log(LOG_FILE);
+                    Self::enqueue_next(&mut pending, &worker_pool, timeout, &mut jobs);
+                    continue;
+                }
+            };
+
+            let item_price = cache
+                .item_price()
+                .find_by(&item_entry.wfm_url, item_entry.sub_type.clone())?
+                .unwrap_or_default();
+
+            self.send_event(
+                "checking",
+                Some(json!({
+                    "current": current_index,
+                    "total": total,
+                    "name": item_info.name,
+                    "sub_type": item_entry.sub_type,
+                    "price": item_price
+                })),
+            );
+
+            let orders = match orders_result {
+                Ok(orders) => orders,
+                Err(e) => {
+                    warning(
+                        format!("{}WorkerPool", COMPONENT),
+                        &format!(
+                            "Worker fetch failed for {}: {}. Falling back to direct API.",
+                            item_entry.wfm_url, e
+                        ),
+                        &&LoggerOptions::default(),
+                    );
+                    fetch_and_cache_orders(
+                        &format!("{}ProcessItem", COMPONENT),
+                        &app.wfm_client,
+                        &item_entry.wfm_url,
+                        None,
+                    )
+                    .await?
+                }
+            };
+
+            if let Err(e) = self
+                .process_item_orders(&item_entry, &item_info, &item_price, orders, app)
+                .await
+            {
+                jobs.abort_all();
+                return Err(e);
+            }
+
+            Self::enqueue_next(&mut pending, &worker_pool, timeout, &mut jobs);
+            current_index += 1;
+        }
+
+        Ok(())
+    }
+
+    fn enqueue_next(
+        pending: &mut impl Iterator<Item = ItemEntry>,
+        worker_pool: &Arc<MultiWorkerPool>,
+        timeout: Duration,
+        jobs: &mut JoinSet<(ItemEntry, Result<OrderList<OrderWithUser>, utils::Error>)>,
+    ) {
+        if let Some(next) = pending.next() {
+            let slug = next.wfm_url.clone();
+            let wp = worker_pool.clone();
+            jobs.spawn(async move {
+                let result = wp.fetch_orders(slug, timeout).await;
+                (next, result)
+            });
+        }
     }
 
     pub async fn progress_buying(

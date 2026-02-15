@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path, sync::OnceLock};
+use std::{collections::HashMap, path::Path, sync::OnceLock, time::Duration};
 
 use entity::{stock_item::*, wish_list::*};
 use serde_json::json;
@@ -449,6 +449,33 @@ pub async fn fetch_and_cache_orders(
     item_url: &str,
     cache_path: Option<&Path>,
 ) -> Result<OrderList<OrderWithUser>, Error> {
+    // Try worker pool (if those slave are connected)
+    let worker_pool = crate::live_scraper::MultiWorkerPool::global();
+    if worker_pool.worker_count().await > 0 {
+        match worker_pool
+            .fetch_orders(item_url, Duration::from_secs(30))
+            .await
+        {
+            Ok(orders) => {
+                if let Some(path) = cache_path {
+                    utils::write_json_file(path, &orders)?;
+                }
+                return Ok(orders);
+            }
+            Err(e) => {
+                warning(
+                    format!("{}:WorkerFallback", component),
+                    &format!(
+                        "Worker fetch failed for {}: {}. Falling back to direct API.",
+                        item_url, e
+                    ),
+                    &&LoggerOptions::default(),
+                );
+            }
+        }
+    }
+
+    // Direct API fallback
     let orders = wfm_client
         .order()
         .get_orders_by_item(item_url)

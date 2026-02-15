@@ -126,13 +126,15 @@ async fn setup_manages(app: tauri::AppHandle, use_temp_db: bool) -> Result<(), E
 
     let live_scraper_state = LiveScraperState::new();
     app.manage(live_scraper_state);
+    // Start multi-worker websocket host at app startup to avoid first-run reconnect lag.
+    let _worker_pool = crate::live_scraper::MultiWorkerPool::global();
 
     app.manage(Mutex::new(LogParserState::new(&settings.advanced_settings)));
     Ok(())
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let use_temp_db = true;
+    let use_temp_db = false;
 
     // Initialize the logger for elapsed time tracking
 
